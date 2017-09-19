@@ -25,6 +25,7 @@ GLuint program;
 GLuint vao;
 GLuint vbo;
 WNDPROC EditWndProc;
+float width, height;
 const TCHAR szClassName[] = TEXT("Window");
 const GLfloat position[][2] = { { -1.f, -1.f },{ 1.f, -1.f },{ 1.f, 1.f },{ -1.f, 1.f } };
 const int vertices = sizeof position / sizeof position[0];
@@ -91,7 +92,25 @@ public:
 			RegCloseKey(hKey);
 		}
 	}
-	LPSTR GetShaderCode() { return m_lpszShaderCode; }
+	LPSTR GetShaderCode() {
+		if (!m_lpszShaderCode || lstrlenA(m_lpszShaderCode) == 0) {
+			return
+				"uniform float time;\r\n"
+				"uniform float width;\r\n"
+				"uniform float height;\r\n"
+				"\r\n"
+				"void main()\r\n"
+				"{\r\n"
+				"    vec2 p = vec2(\r\n"
+				"        sin(time / 2.0) * (width / 2.0 - 100.0) + (width / 2.0),\r\n"
+				"        cos(time / 3.0) * (height / 2.0 - 100.0) + (height / 2.0)\r\n"
+				"    );\r\n"
+				"    float c = 32.0 / distance(gl_FragCoord, p);\r\n"
+				"    gl_FragColor = vec4(c*c, c*c, c*c, 1.0);\r\n"
+				"}";
+		}
+		return m_lpszShaderCode;
+	}
 	void SetShaderCode(LPCSTR lpszShaderCode) {
 		GlobalFree(m_lpszShaderCode);
 		const int nSize = lstrlenA(lpszShaderCode);
@@ -170,10 +189,15 @@ inline GLuint CreateProgram(LPCSTR vsrc, LPCSTR fsrc)
 	}
 	glDeleteShader(vobj);
 	glDeleteShader(fobj);
+	if (program) {
+		glUseProgram(program);
+		glUniform1f(glGetUniformLocation(program, "width"), width);
+		glUniform1f(glGetUniformLocation(program, "height"), height);
+	}
 	return program;
 }
 
-inline BOOL InitGL(GLvoid)
+inline BOOL InitGL()
 {
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	glGenVertexArrays(1, &vao);
@@ -191,13 +215,10 @@ inline BOOL InitGL(GLvoid)
 inline VOID DrawGLScene(GLvoid)
 {
 	glClear(GL_COLOR_BUFFER_BIT);
-	glUseProgram(program);
-	const GLint time = glGetUniformLocation(program, "time");
-	glUniform1f(time, GetTickCount() / 1000.0f);
+	glUniform1f(glGetUniformLocation(program, "time"), GetTickCount() / 1000.0f);
 	glBindVertexArray(vao);
 	glDrawArrays(GL_QUADS, 0, vertices);
 	glBindVertexArray(0);
-	glUseProgram(0);
 	glFlush();
 }
 
@@ -261,13 +282,20 @@ LRESULT WINAPI ScreenSaverProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 	if (!bPreviewMode) {
 		EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, (LPARAM)&MonitorList);
 		std::sort(MonitorList.begin(), MonitorList.end(), std::greater<RECT>());
+		width = (float)(MonitorList[0].right - MonitorList[0].left);
+		height = (float)(MonitorList[0].bottom - MonitorList[0].top);
+	}else {
+		RECT rect;
+		GetClientRect(hWnd, &rect);
+		width = (float)rect.right;
+		height = (float)rect.bottom;
 	}
 	setting.Load();
 	{
 		TCHAR szClassName[] = TEXT("DrawShaderControl");
 		const WNDCLASS wndclass = { 0, DrawShaderControlProc, 0, 0, ((LPCREATESTRUCT)lParam)->hInstance, 0, LoadCursor(0, IDC_ARROW), 0, 0, szClassName };
 		RegisterClass(&wndclass);
-		hDrawShaderControl = CreateWindow(szClassName, 0, (bPreviewMode ? WS_CHILD | WS_DISABLED : WS_POPUP) | WS_VISIBLE, 0, 0, MonitorList[0].right - MonitorList[0].left, MonitorList[0].bottom - MonitorList[0].top, hWnd, 0, ((LPCREATESTRUCT)lParam)->hInstance, 0);
+		hDrawShaderControl = CreateWindow(szClassName, 0, (bPreviewMode ? WS_CHILD | WS_DISABLED : WS_POPUP) | WS_VISIBLE, 0, 0, (int)width, (int)height, hWnd, 0, ((LPCREATESTRUCT)lParam)->hInstance, 0);
 	}
 	if (!hDrawShaderControl)
 		return -1;
@@ -286,7 +314,6 @@ LRESULT WINAPI ScreenSaverProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		!wglMakeCurrent(hDC, hRC) ||
 		glewInit() != GLEW_OK ||
 		!InitGL()) return -1;
-
 	program = CreateProgram(vsrc, setting.GetShaderCode());
 	SetTimer(hWnd, 0x1234, 1, 0);
 	break;
@@ -296,12 +323,7 @@ LRESULT WINAPI ScreenSaverProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		SetTimer(hWnd, 0x1234, 1, 0);
 		break;
 	case WM_SIZE:
-		if (bPreviewMode) {
-			RECT rect;
-			GetClientRect(hWnd, &rect);
-			MoveWindow(hDrawShaderControl, 0, 0, rect.right, rect.bottom, TRUE);
-		}
-		else {
+		if (!bPreviewMode) {
 			MoveWindow(hDrawShaderControl, MonitorList[0].left, MonitorList[0].top, MonitorList[0].right - MonitorList[0].left, MonitorList[0].bottom - MonitorList[0].top, TRUE);
 			for (unsigned int i = 1; i < MonitorList.size(); ++i) {
 				RECT dest = MonitorList[i];
@@ -319,6 +341,7 @@ LRESULT WINAPI ScreenSaverProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		break;
 	case WM_DESTROY:
 		KillTimer(hWnd, 0x1234);
+		glUseProgram(0);
 		if (program) glDeleteProgram(program);
 		if (vbo) glDeleteBuffers(1, &vbo);
 		if (vao) glDeleteVertexArrays(1, &vao);
