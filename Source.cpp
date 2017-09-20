@@ -105,7 +105,7 @@ public:
 				"        sin(time / 2.0) * (width / 2.0 - 100.0) + (width / 2.0),\r\n"
 				"        cos(time / 3.0) * (height / 2.0 - 100.0) + (height / 2.0)\r\n"
 				"    );\r\n"
-				"    float c = 32.0 / distance(gl_FragCoord, p);\r\n"
+				"    float c = 32.0 / length(gl_FragCoord - p);\r\n"
 				"    gl_FragColor = vec4(c*c, c*c, c*c, 1.0);\r\n"
 				"}";
 		}
